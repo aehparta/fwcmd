@@ -12,39 +12,29 @@
 
 # Author: Antti Partanen <aehparta@iki.fi>
 
-DESC="Basic firewall"
+set -e
 
-#################################################
-#################################################
-# NOTE: Usually don't touch anything here       #
-# rather modify /etc/fwcmd-rules.conf           #
-#################################################
-#################################################
+CONF="/etc/fwcmd-rules.conf"
+if [ "$2" != "" ]; then
+	CONF="$2"
+fi
 
-# some defaults
 WAN=""
 LAN=""
 TRUSTED=""
 SSH=1
 NAT=0
-
-# rules
 RULES=()
 
-# commands
 IPTABLES=/sbin/iptables
 IFCONFIG=/sbin/ifconfig
 
-# files
-CONF="/etc/fwcmd-rules.conf"
-if [ "$1" != "" ]; then
-	CONF="$1"
-fi
+. /lib/lsb/init-functions
 
 # critical error
 crit()
 {
-	echo "$@" 1>&2;
+	log_action_msg "$@" || true
 	exit 1
 }
 
@@ -178,6 +168,8 @@ parse_single_rule()
 		rule="-A INPUT $rule -j DROP"
 	elif [ "$1" == "accept" ]; then
 		rule="-A INPUT $rule -j ACCEPT"
+	elif [ "$1" == "forward" ]; then
+		rule="-A FORWARD $rule -j ACCEPT"
 	else
 		crit "Invalid rule: $1 $2"
 	fi
@@ -188,13 +180,13 @@ parse_single_rule()
 # parse rules
 do_parse()
 {
-	echo "Reading rules from $CONF"
+	log_action_msg "Reading rules from $CONF" || true
 	if [ ! -f "$CONF" ]; then
 		crit "Configuration is missing"
 	fi
 
 	# parse rules file
-	while read line; do
+	while read -r line || [[ -n "$line" ]]; do
 		if [ "${#line}" -lt "1" ]; then
 		    continue
 		fi
@@ -213,7 +205,12 @@ do_parse()
 		elif [ "$command" == "lan" ]; then
 			LAN="$args"
 		elif [ "$command" == "trust" ]; then
-			TRUSTED="$TRUSTED $args"
+			for ip in $args; do
+				if ! valid_ip $ip; then
+					crit "Trusted address $ip is not valid: $command $args"
+				fi
+				TRUSTED="$TRUSTED $ip"
+			done
 		elif [ "$command" == "nossh" ]; then
 			SSH=0
 		elif [ "$command" == "nat" ]; then
@@ -222,6 +219,10 @@ do_parse()
 			parse_single_rule "$command" "$args"
 		elif [ "$command" == "accept" ]; then
 			parse_single_rule "$command" "$args"
+		elif [ "$command" == "forward" ]; then
+			parse_single_rule "$command" "$args"
+		else
+			crit "Invalid command: $command $args"
 		fi
 	done < $CONF
 
@@ -236,21 +237,39 @@ do_parse()
 			crit "LAN interface is invalid"
 		fi
 	fi
-	# check trusted ips
-	for ip in $TRUSTED; do
-		if ! valid_ip $ip; then
-			crit "Trusted ip $ip is not valid"
+
+	# show rules if testing
+	if [ "$1" == "test" ]; then
+		log_action_msg "WAN: $WAN" || true
+		if [ "$LAN" != "" ]; then
+			log_action_msg "LAN: $LAN" || true
+		else
+			log_action_msg "LAN: none" || true
 		fi
-	done
+		if [ "$NAT" == "1" ]; then
+			log_action_msg "NAT: enabled" || true
+		else
+			log_action_msg "NAT: disabled" || true
+		fi
+		if [ "$SSH" != "0" ]; then
+			log_action_msg "SSH: enabled" || true
+		else
+			log_action_msg "SSH: disabled" || true
+		fi
+		for i in ${!RULES[*]}; do
+			log_action_msg ${RULES[$i]} || true
+		done
+		for ip in $TRUSTED; do
+			log_action_msg "-I INPUT -s $ip -j ACCEPT" || true
+		done
+	fi
+
+	log_action_msg "Configuration OK" || true
 }
 
-# setup firewall
 do_start()
 {
-	echo "Setup firewall"
-
-	# parse rules file
-	do_parse
+	log_action_msg "Start firewall" || true
 
 	# set default rules
 	$IPTABLES -P INPUT DROP
@@ -265,7 +284,6 @@ do_start()
 
 	# add rules
 	for i in ${!RULES[*]}; do
-		echo ${RULES[$i]}
 		$IPTABLES ${RULES[$i]}
 	done
 
@@ -292,12 +310,7 @@ do_start()
 	$IPTABLES -I INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 	$IPTABLES -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
 
-	#################################################
-	#################################################
-	# CUSTOM ########################################
-	#################################################
-	#################################################
-
+	# enable nat if said so
 	if [ "$NAT" == "1" ]; then
 		# enable forwarding
 		echo 1 > /proc/sys/net/ipv4/ip_forward
@@ -309,18 +322,39 @@ do_start()
 		fi
 	fi
 
-	#################################################
-	# END CUSTOM ####################################
-	#################################################
-
-	# deny anything else
-	#$IPTABLES -A INPUT -p tcp -j DROP
-	#$IPTABLES -A INPUT -p udp --dport 0:1024 -j DROP
-	#$IPTABLES -A FORWARD -p tcp -j DROP
-	#$IPTABLES -A FORWARD -p udp --dport 0:1024 -j DROP
-
-	echo "Firewall up"
+	log_action_msg "Firewall up" || true
 }
-# end setup firewall
 
-do_start
+do_stop()
+{
+	log_action_msg "Stop firewall (setting all to accept and flushing all rules)" || true
+
+	# set default rules
+	$IPTABLES -P INPUT ACCEPT
+	$IPTABLES -P FORWARD ACCEPT
+	$IPTABLES -P OUTPUT ACCEPT
+
+	# clear all tables
+	$IPTABLES -F -t filter
+	$IPTABLES -F -t nat
+	$IPTABLES -F -t mangle
+	$IPTABLES -F -t raw
+
+	log_action_msg "Firewall down" || true
+}
+
+case "$1" in
+	start|restart|reload)
+		do_parse
+		do_start
+		;;
+	stop)
+		do_stop
+		;;
+	test)
+		do_parse test
+		;;
+	*)
+		log_action_msg "Usage: /etc/init.d/fwcmd {start|stop|reload|restart|test}" || true
+		exit 1
+esac
