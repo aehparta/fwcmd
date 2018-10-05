@@ -12,8 +12,6 @@
 
 # Author: Antti Partanen <aehparta@iki.fi>
 
-set -e
-
 CONF="/etc/fwcmd-rules.conf"
 if [ "$2" != "" ]; then
 	CONF="$2"
