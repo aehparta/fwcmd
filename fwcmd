@@ -81,12 +81,15 @@ parse_single_rule()
 	local dnat_dst=""
 	local dnat_dst_ip=""
 	local dnat_dst_port=""
+	local forward_target="ACCEPT"
 	local i=0
 
 	# check optional proto
 	proto=${2%% *}
 	if [ "$proto" == "icmp" ] || [ "$proto" == "tcp" ] || [ "$proto" == "udp" ]; then
 		proto="-p $proto"
+	elif [ "$proto" == "drop" ] && [ "$1" == "forward" ]; then
+		forward_target="DROP"
 	else
 		proto=""
 		i=1
@@ -186,7 +189,7 @@ parse_single_rule()
 		RULES+=("-A INPUT $proto $rule -j ACCEPT")
 	elif [ "$1" == "forward" ]; then
 		FORWARD=1
-		RULES+=("-A FORWARD $proto $rule -j ACCEPT")
+		RULES+=("-A FORWARD $proto $rule -j $forward_target")
 	elif [ "$1" == "dnat" ]; then
 		if [ "$dnat_dst" == "" ]; then
 			crit "Rule missing destination: $1 $2"
