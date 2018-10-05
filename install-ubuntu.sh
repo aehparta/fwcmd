@@ -6,5 +6,6 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 cp fwcmd /etc/init.d/fwcmd
+chmod +x /etc/init.d/fwcmd
 cp fwcmd-rules.conf /etc/fwcmd-rules.conf
 systemctl enable fwcmd
