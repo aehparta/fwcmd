@@ -22,6 +22,7 @@ LAN=""
 TRUSTED=""
 SSH=1
 NAT=0
+FORWARD=0
 RULES=()
 
 IPTABLES=/sbin/iptables
@@ -167,6 +168,7 @@ parse_single_rule()
 	elif [ "$1" == "accept" ]; then
 		rule="-A INPUT $rule -j ACCEPT"
 	elif [ "$1" == "forward" ]; then
+		FORWARD=1
 		rule="-A FORWARD $rule -j ACCEPT"
 	else
 		crit "Invalid rule: $1 $2"
@@ -213,6 +215,7 @@ do_parse()
 			SSH=0
 		elif [ "$command" == "nat" ]; then
 			NAT=1
+			FORWARD=1
 		elif [ "$command" == "drop" ]; then
 			parse_single_rule "$command" "$args"
 		elif [ "$command" == "accept" ]; then
@@ -308,10 +311,15 @@ do_start()
 	$IPTABLES -I INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 	$IPTABLES -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
 
+	# enable/disable forward
+	if [ "$FORWARD" == "1" ]; then
+		echo 1 > /proc/sys/net/ipv4/ip_forward
+	else
+		echo 0 > /proc/sys/net/ipv4/ip_forward
+	fi
+
 	# enable nat if said so
 	if [ "$NAT" == "1" ]; then
-		# enable forwarding
-		echo 1 > /proc/sys/net/ipv4/ip_forward
 		# enable nat
 		$IPTABLES -t nat -A POSTROUTING -o $WAN -j MASQUERADE
 		# add LAN interface forward
