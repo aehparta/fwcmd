@@ -86,7 +86,7 @@ parse_single_rule()
 	# check optional proto
 	proto=${2%% *}
 	if [ "$proto" == "icmp" ] || [ "$proto" == "tcp" ] || [ "$proto" == "udp" ]; then
-		rule="-p $proto"
+		proto="-p $proto"
 	else
 		proto=""
 		i=1
@@ -181,23 +181,23 @@ parse_single_rule()
 
 	# add target
 	if [ "$1" == "drop" ]; then
-		RULES+=("-A INPUT $rule -j DROP")
+		RULES+=("-A INPUT $proto $rule -j DROP")
 	elif [ "$1" == "accept" ]; then
-		RULES+=("-A INPUT $rule -j ACCEPT")
+		RULES+=("-A INPUT $proto $rule -j ACCEPT")
 	elif [ "$1" == "forward" ]; then
 		FORWARD=1
-		RULES+=("-A FORWARD $rule -j ACCEPT")
+		RULES+=("-A FORWARD $proto $rule -j ACCEPT")
 	elif [ "$1" == "dnat" ]; then
 		if [ "$dnat_dst" == "" ]; then
 			crit "Rule missing destination: $1 $2"
 		fi
 		FORWARD=1
 		if [ "$dnat_dst_port" != "" ]; then
-			RULES+=("-A FORWARD -d $dnat_dst_ip --dport $dnat_dst_port -j ACCEPT")
+			RULES+=("-A FORWARD $proto -d $dnat_dst_ip --dport $dnat_dst_port -j ACCEPT")
 		else
-			RULES+=("-A FORWARD -d $dnat_dst_ip -j ACCEPT")
+			RULES+=("-A FORWARD $proto -d $dnat_dst_ip -j ACCEPT")
 		fi
-		RULES+=("-t nat -A PREROUTING -i $WAN $rule -j DNAT $dnat_dst")
+		RULES+=("-t nat -A PREROUTING $proto -i $WAN $rule -j DNAT $dnat_dst")
 	else
 		crit "Invalid rule: $1 $2"
 	fi
