@@ -7,5 +7,7 @@ fi
 
 cp fwcmd /etc/init.d/fwcmd
 chmod +x /etc/init.d/fwcmd
-cp fwcmd-rules.conf /etc/fwcmd-rules.conf
+if [ ! -f /etc/fwcmd-rules.conf ]; then
+	cp fwcmd-rules.conf /etc/fwcmd-rules.conf
+fi
 systemctl enable fwcmd
