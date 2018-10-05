@@ -188,7 +188,7 @@ parse_single_rule()
 		FORWARD=1
 		rule="-A FORWARD $rule -j ACCEPT"
 	elif [ "$1" == "dnat" ]; then
-		rule="-A PREROUTING -i $WAN $rule"
+		rule="-t nat -A PREROUTING -i $WAN $rule"
 	else
 		crit "Invalid rule: $1 $2"
 	fi
