@@ -120,7 +120,11 @@ parse_single_rule()
 			elif [ "$src_port" -gt "65535" ]; then
 				crit "Invalid source port for rule: $1 $2"
 			fi
-			rule="$rule --sport $src_port"
+			if [ "$1" == "dnat" ]; then
+				rule="$rule --dport $src_port"
+			else
+				rule="$rule --sport $src_port"
+			fi
 		fi
 		if [ "$src_ip" == "any" ]; then
 			src_ip="0.0.0.0/0"
@@ -130,12 +134,17 @@ parse_single_rule()
 		rule="$rule -s $src_ip"
 	fi
 
+	if [ "$1" == "dnat" ]; then
+		rule="$rule -j DNAT"
+	fi
+
 	# check destination
 	if [ "$dst" != "" ]; then
 		ip_not=""
 		port_not=""
 		dst_ip=${dst%:*}
 		dst_port=${dst##*:}
+		dnat_port=""
 		if [ "${dst_ip:0:1}" == "!" ]; then
 			ip_not="!"
 			dst_ip=${dst_ip:1}
@@ -152,14 +161,22 @@ parse_single_rule()
 			elif [ "$dst_port" -gt "65535" ]; then
 				crit "Invalid destination port for rule: $1 $2"
 			fi
-			rule="$rule $port_not --dport $dst_port"
+			if [ "$1" == "dnat" ]; then
+				dnat_port=":$dst_port"
+			else
+				rule="$rule $port_not --dport $dst_port"
+			fi
 		fi
 		if [ "$dst_ip" == "any" ]; then
 			dst_ip="0.0.0.0/0"
 		elif ! valid_ip $dst_ip; then
 			crit "Invalid destination address for rule: $1 $2"
 		fi
-		rule="$rule $ip_not -d $dst_ip"
+		if [ "$1" == "dnat" ]; then
+			rule="$rule --to-destination $dst_ip$dnat_port"
+		else
+			rule="$rule $ip_not -d $dst_ip"
+		fi
 	fi
 
 	# add target
@@ -170,6 +187,8 @@ parse_single_rule()
 	elif [ "$1" == "forward" ]; then
 		FORWARD=1
 		rule="-A FORWARD $rule -j ACCEPT"
+	elif [ "$1" == "dnat" ]; then
+		rule="-A PREROUTING -i $WAN $rule"
 	else
 		crit "Invalid rule: $1 $2"
 	fi
@@ -185,7 +204,7 @@ do_parse()
 		crit "Configuration is missing"
 	fi
 
-	# parse rules file
+	# parse rules file, first time
 	while read -r line || [[ -n "$line" ]]; do
 		if [ "${#line}" -lt "1" ]; then
 		    continue
@@ -204,26 +223,11 @@ do_parse()
 			WAN="$args"
 		elif [ "$command" == "lan" ]; then
 			LAN="$args"
-		elif [ "$command" == "trust" ]; then
-			for ip in $args; do
-				if ! valid_ip $ip; then
-					crit "Trusted address $ip is not valid: $command $args"
-				fi
-				TRUSTED="$TRUSTED $ip"
-			done
 		elif [ "$command" == "nossh" ]; then
 			SSH=0
 		elif [ "$command" == "nat" ]; then
 			NAT=1
 			FORWARD=1
-		elif [ "$command" == "drop" ]; then
-			parse_single_rule "$command" "$args"
-		elif [ "$command" == "accept" ]; then
-			parse_single_rule "$command" "$args"
-		elif [ "$command" == "forward" ]; then
-			parse_single_rule "$command" "$args"
-		else
-			crit "Invalid command: $command $args"
 		fi
 	done < $CONF
 
@@ -238,6 +242,39 @@ do_parse()
 			crit "LAN interface is invalid"
 		fi
 	fi
+
+	# parse rules file, second time
+	while read -r line || [[ -n "$line" ]]; do
+		if [ "${#line}" -lt "1" ]; then
+		    continue
+		fi
+		if [ "${line:0:1}" == "#" ]; then
+		    continue
+		fi
+
+		# separate command and argument(s)
+		command=${line%% *}
+		args=${line#* }
+		# trim leading spaces from arguments
+		args=${args#"${args%%[![:space:]]*}"}
+
+		if [ "$command" == "drop" ]; then
+			parse_single_rule "$command" "$args"
+		elif [ "$command" == "accept" ]; then
+			parse_single_rule "$command" "$args"
+		elif [ "$command" == "forward" ]; then
+			parse_single_rule "$command" "$args"
+		elif [ "$command" == "dnat" ]; then
+			parse_single_rule "$command" "$args"
+		elif [ "$command" == "trust" ]; then
+			for ip in $args; do
+				if ! valid_ip $ip; then
+					crit "Trusted address $ip is not valid: $command $args"
+				fi
+				TRUSTED="$TRUSTED $ip"
+			done
+		fi
+	done < $CONF
 
 	# show rules if testing
 	if [ "$1" == "test" ]; then
